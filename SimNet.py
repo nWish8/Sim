@@ -71,17 +71,18 @@ class MyNode(wsp.LayeredNode):
         Send a Data Request (DREQ) message to broadcast address.
         '''
         self.send(wsp.BROADCAST_ADDR, msg='dreq', src=src, cntr=cntr, overhead=overhead, path=path, clk=clk)
+        self.log(f"SENT: DREQ from {self.id}")
 
     ###################
     def send_dreply(self, src, data):
         '''
         Send a Data Reply (DREP) message to the lowest overhead node.
         '''
-
-        self.send(self.path, msg='dreply', src=src, data=data)
         self.strt_flag = False
         self.branch_flag = False
-        self.log(f"Data Reply: flags False")
+        #self.log(f"NeighborTable | {self.neighbor_table}")
+        self.send(self.path, msg='dreply', src=src, data=data)
+        self.log(f"SENT: DREP to {self.path}")
 
     ###################
     def on_receive(self, sender, msg, src, **kwargs):
@@ -109,7 +110,6 @@ class MyNode(wsp.LayeredNode):
                     'path': kwargs['path'],             # Store the path
                     'rx': 0                             # Store the number of packets received
                 }
-                self.log(f"NeighborTable | {self.neighbor_table}")
                 self.overhead = new_overhead        # Update self.overhead
                 self.path = sender                  # Update self.path
 
@@ -129,7 +129,6 @@ class MyNode(wsp.LayeredNode):
                         'path': kwargs['path'],                     # Store the neighbor's path
                         'rx': 0                                     # Store the number of packets received
                     }
-                    self.log(f"UpdatedNeighborTable | {self.neighbor_table}")
                     self.scene.addlink(sender, self.id, "parent") # Sim: Add a link between the sender and this node
 
                     if kwargs['overhead'] < self.neighbor_table[self.lowestoverheadNeighbor()]['overhead']:
@@ -155,25 +154,28 @@ class MyNode(wsp.LayeredNode):
                 
                 self.neighbor_table.setdefault(sender, {})['rx'] = 1
 
+                # Log the neighbor table entries where 'path' == self.id
+                matching_neighbors = {key: neighbor for key, neighbor in self.neighbor_table.items() if neighbor.get('path') == self.id}
+                #self.log(f"Matching Neighbors (path == self.id): {matching_neighbors}")
+
+
                 # Filter neighbors where 'path' == self.id and check if they all have 'rx' == 1
                 if all(neighbor.get('rx', 0) == 1 for neighbor in self.neighbor_table.values() if neighbor.get('path') == self.id):
-
-                    self.log(f"RECEIVED: All neighbor packets received")
                     
-                    # Add own data to the dataCache
-                    self.dataCache[self.id] = f"data"
+                    self.dataCache[self.id] = f"data" # Add own data to the dataCache
 
                     yield self.timeout(randdelay())  # Wait for a random delay
                     self.send_dreply(self.id, self.dataCache)  # Send the data packet to the next node
-                    self.log(f"SENT: data reply to node {self.path} : {self.dataCache}")
 
                 else:
-                    self.log(f"WAITING | {self.neighbor_table}")
+                    self.log(f"WAITING | {matching_neighbors}")
 
 
             else:
-                self.log(self.dataCache)
-                self.log(f"#{self.cntr} : Collection Success")
+                self.dataCache[self.id] = f"data" # Add own data to the dataCache
+
+                if len(self.dataCache) == num_nodes:
+                    self.log(f"#{self.cntr} : Collection Success")
 
     ###################
     def delayed_exec(self, delay, func, *args, **kwargs):
@@ -191,9 +193,7 @@ class MyNode(wsp.LayeredNode):
                 self.scene.nodewidth(self.id, 2)
 
                 # Send the DREP message
-                #self.log(f"Data Reply: strt_flag True")
                 self.send_dreply(self.id, self.dataCache)
-                self.log(f"SENT: data reply to node {self.path} : {self.dataCache} $$$ {self.overhead}")
 
         if self.branch_flag == False:
             self.delayCache[0] = self.now
@@ -242,7 +242,7 @@ class MyNode(wsp.LayeredNode):
 ###########################################################
 sim = wsp.Simulator(
     until=200,
-    timescale=5,
+    timescale=2,
     visual=True,
     terrain_size=(350, 350),
     title="VineNet Sim")
