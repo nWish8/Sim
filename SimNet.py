@@ -23,13 +23,14 @@ class MyNode(wsp.LayeredNode):
         super().init()
         self.cntr = 0
         self.neighbor_table = {}  # Dictionary to store neighbors their overheads and path
+        self.recieved_dreply = {} # Dictionary to store recieved data packets
         self.overhead = 1
         self.path = 0
         self.clk_offset = 0  # Clock offset for synchronization
         self.strt_flag = False
         self.branch_flag = False
         self.delayCache = {}
-        self.dataCache = ""
+        self.dataCache = {}
 
     ###################
     def run(self):
@@ -72,28 +73,14 @@ class MyNode(wsp.LayeredNode):
         self.send(wsp.BROADCAST_ADDR, msg='dreq', src=src, cntr=cntr, overhead=overhead, path=path, clk=clk)
 
     ###################
-    def send_dreply(self, src):
+    def send_dreply(self, src, data):
         '''
         Send a Data Reply (DREP) message to the lowest overhead node.
         '''
-        if self.id != GATEWAY:
-            self.scene.nodecolor(self.id, 0, 0.7, 0)  # Set the color of the node to green
-            self.scene.nodewidth(self.id, 2)
-        next = min(self.neighbor_table, key=self.neighbor_table.get)
-        self.send(next, msg='dreply', src=src)
-
-    ###################
-    def send_data(self, src, seq):
-        '''
-        Forward data packets to the next node in the lowest overhead route.
-        '''
-        
-        # Get the index of the lowest overhead neighbor
-        next = self.lowestoverheadNeighbor()
-        
-        # Forward the data packet to the next node
-        self.send(next, msg='data', src=src, seq=seq)
-
+        # if self.id != GATEWAY:
+        #     self.scene.nodecolor(self.id, 0, 0.7, 0)  # Set the color of the node to green
+        #     self.scene.nodewidth(self.id, 2)
+        self.send(self.path, msg='dreply', src=src, data=data)
         self.strt_flag = False
         self.branch_flag = False
         self.log(f"Data Reply: flags False")
@@ -121,8 +108,10 @@ class MyNode(wsp.LayeredNode):
             if not self.neighbor_table :        # First DREQ message received
                 self.neighbor_table[sender] = {     # Update the neighbor table
                     'overhead': kwargs['overhead'],     # Store the overhead
-                    'path': kwargs['path']              # Store the path
+                    'path': kwargs['path'],             # Store the path
+                    'rx': 0                             # Store the number of packets received
                 }
+                self.log(f"NeighborTable | {self.neighbor_table}")
                 self.overhead = new_overhead        # Update self.overhead
                 self.path = sender                  # Update self.path
 
@@ -132,15 +121,17 @@ class MyNode(wsp.LayeredNode):
                 self.send_dreq(src, self.cntr, self.overhead, self.path, sim.env.now) # Forward the RREQ message to neighbors
 
                 self.strt_flag = True # Set the start flag to True
-                self.dataCache = f"Path : {self.id}" # Initialize the data cache
-                self.data_reply()  # Start the reply process
+                self.dataCache[self.id] = f"data" # Initialize the data cache
+                self.start_reply()  # Start the reply process
 
             if self.neighbor_table:  # Node has received a DREQ message before
                 if sender not in self.neighbor_table or kwargs['overhead'] < self.neighbor_table[sender]['overhead']:
                     self.neighbor_table[sender] = {             # Update the neighbor table
                         'overhead': kwargs['overhead'],             # Store the neighbor's overhead
-                        'path': kwargs['path']                      # Store the neighbor's path
+                        'path': kwargs['path'],                     # Store the neighbor's path
+                        'rx': 0                                     # Store the number of packets received
                     }
+                    self.log(f"UpdatedNeighborTable | {self.neighbor_table}")
                     self.scene.addlink(sender, self.id, "parent") # Sim: Add a link between the sender and this node
 
                     if kwargs['overhead'] < self.neighbor_table[self.lowestoverheadNeighbor()]['overhead']:
@@ -153,51 +144,37 @@ class MyNode(wsp.LayeredNode):
                         self.strt_flag = False
                         yield self.timeout(self.delayCache[1])
                         self.strt_flag = True
-                        self.data_reply() # Start the reply process again
+                        self.start_reply() # Start the reply process again
 
 
         elif msg == 'dreply':
-            self.next = sender
-            if self.id == GATEWAY:
-                self.log(f"Received DREP from {src}")
-                yield self.timeout(5)
-                self.log("Start sending data")
-                #self.start_process(self.start_send_data())
-            else:
-                yield self.timeout(0.2)
-                self.send_rreply(src)
+            self.log(f"RECIEVED: DREP from {sender}")
 
-        elif msg == 'data':
-            if self.id != GATEWAY:                
-                self.log(f"RECIEVED:\nNode {'#'+str(self.id):4}[----.-----] {kwargs['seq']}")
+            # Add the data to the cache by merging dictionaries
+            self.dataCache.update(kwargs['data'])  # or use {**self.dataCache, **kwargs['data']}
 
-                if self.branch_flag: # If another data packet is recieved before send add to the sequence
-                    self.log(f"RECIEVED: branch_flag = True")
+            if self.id != GATEWAY:     
+                
+                self.neighbor_table.setdefault(sender, {})['rx'] = 1
 
-                    self.dataCache = kwargs['seq'] + f">>{self.id}\n" + f"Node {'#'+str(self.id):4}[----.-----] " + self.dataCache # Add the node id to the sequence                  
-                    self.log(f"RECIEVED: dataCache Updated")
+                # Filter neighbors where 'path' == self.id and check if they all have 'rx' == 1
+                if all(neighbor.get('rx', 0) == 1 for neighbor in self.neighbor_table.values() if neighbor.get('path') == self.id):
+
+                    self.log(f"RECEIVED: All neighbor packets received")
                     
-                    self.log(f"RECIEVED: Branch.. current delay at {self.delayCache[0] + self.delayCache[1]}")
-                    new_delay = self.branchdelay()
-                    self.log(f"RECIEVED: Branch.. new delay at {self.now + new_delay}")
-                    self.delayCache[2] =+ 1
-                    self.log(f"RECIEVED: Branch.. num_branch {self.delayCache[2]}")
-                    self.data_reply()
-                    #self.log(f"RECIEVED: Branch.. delay set")
-                    return
+                    # Add own data to the dataCache
+                    self.dataCache[self.id] = f"data"
 
-                # Add data to seq
-                self.dataCache = kwargs['seq'] + f">{self.id}"
-                self.log(f"RECIEVED: dataCache Updated:")
-                self.log(f"{self.dataCache}")
-                new_delay = self.branchdelay()
-                self.log(f"RECIEVED: new delay at {self.now + new_delay}")
-                self.branch_flag = True
-                self.log(f"Set branch flag true")
-                self.data_reply()
+                    yield self.timeout(randdelay())  # Wait for a random delay
+                    self.send_dreply(self.id, self.dataCache)  # Send the data packet to the next node
+                    self.log(f"SENT: data reply to node {self.path} : {self.dataCache}")
+
+                else:
+                    self.log(f"WAITING | {self.neighbor_table}")
+
 
             else:
-                self.log(kwargs['seq'] + f">{self.id}")
+                self.log(self.dataCache)
                 self.log(f"#{self.cntr} : Collection Success")
 
     ###################
@@ -206,22 +183,25 @@ class MyNode(wsp.LayeredNode):
         return self.sim.delayed_exec(delay, func, *args, **kwargs)
 
     ###################
-    def data_reply(self):
+    def start_reply(self):
         '''The reply process'''
         def start():
-            if self.strt_flag:
+            if self.isEdgeNode() and self.strt_flag:
+
+                # Set the color of the node to green
+                self.scene.nodecolor(self.id, 0, 0.7, 0)
+                self.scene.nodewidth(self.id, 2)
+
                 # Send the DREP message
-                self.log(f"Data Reply: strt_flag True")
-                self.send_data(self.id, self.dataCache)
-                self.log(f"SENT: data with seq:")
-                self.log(f"{self.dataCache}")
+                #self.log(f"Data Reply: strt_flag True")
+                self.send_dreply(self.id, self.dataCache)
+                self.log(f"SENT: data reply to node {self.path} : {self.dataCache} $$$ {self.overhead}")
 
         if self.branch_flag == False:
-            self.log(f"Data Reply: branch_flag False")
+            #self.log(f"Data Reply: branch_flag False")
             self.delayCache[0] = self.now
             self.delayCache[1] = self.delay()
             self.delayCache[2] = 1
-        self.log(f"Data Reply: Reply cache {self.delayCache} $ {self.overhead}")
         self.delayed_exec(self.delayCache[1], start)
 
     ###################
@@ -247,16 +227,20 @@ class MyNode(wsp.LayeredNode):
         battery_level = 0.85  # Simulate battery level
         rssi = 0.7  # Simulate RSSI in -dBm
         distance = 40/50  # Simulate distance
-        return (battery_level + rssi + distance)/3  # Calculate and return the overhead
+        return round((battery_level + rssi + distance)/3)  # Calculate and return the overhead
     
     ###################
     def isEdgeNode(self):
         '''
         Determine if the node is an edge node by checking the path of all neighbors.
-        The node is an edge node, self.id will not be the path of any neighbor in the neighbor table.
+        The node is an edge node if its ID is not stored as the path in any neighbor's entry.
         Returns True if the node is an edge node, False otherwise.
         '''
-        return self.id not in self.neighbor_table
+        for neighbor in self.neighbor_table.values():
+            if 'path' in neighbor and neighbor['path'] == self.id:
+                return False
+        return True
+
 
 ###########################################################
 sim = wsp.Simulator(
