@@ -152,7 +152,7 @@ class MyNode(wsp.LayeredNode):
 ###########################################################
 sim = wsp.Simulator(
     until=100,
-    timescale=5,
+    timescale=1,
     visual=True,
     terrain_size=(540, 540),
     title="VineNet Sim")
