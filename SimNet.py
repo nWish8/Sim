@@ -245,7 +245,7 @@ sim = wsp.Simulator(
     timescale=2,
     visual=True,
     terrain_size=(350, 350),
-    title="VineNet Sim")
+    title="SimNet")
 
 # Define a line style for parent links
 sim.scene.linestyle("parent", color=(0, 0.8, 0), arrow="head", width=2)
