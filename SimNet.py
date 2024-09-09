@@ -56,7 +56,7 @@ class MyNode(wsp.LayeredNode):
         '''
         Returns a delay based on the overhead function.
         '''
-        return 0.2 + (2*num_nodes) / (self.overhead+3)
+        return 0.2 + (1.5*num_nodes) / (self.overhead+6)
     
     ###########################################################
     def branchdelay(self):
@@ -186,8 +186,8 @@ class MyNode(wsp.LayeredNode):
         def start():
             if self.isEdgeNode() and self.strt_flag:
 
-                # Set the color of the node to green
-                self.scene.nodecolor(self.id, 0, 0.7, 0)
+                # Set the color of the node to red
+                self.scene.nodecolor(self.id, 1, 0, 0)
                 self.scene.nodewidth(self.id, 2)
 
                 # Send the DREP message
@@ -242,9 +242,9 @@ class MyNode(wsp.LayeredNode):
 ###########################################################
 sim = wsp.Simulator(
     until=200,
-    timescale=1,
+    timescale=5,
     visual=True,
-    terrain_size=(700, 700),
+    terrain_size=(350, 350),
     title="VineNet Sim")
 
 # Define a line style for parent links
