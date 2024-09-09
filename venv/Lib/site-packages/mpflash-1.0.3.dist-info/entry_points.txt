@@ -1,0 +1,3 @@
+[console_scripts]
+mpflash=mpflash.cli_main:mpflash
+

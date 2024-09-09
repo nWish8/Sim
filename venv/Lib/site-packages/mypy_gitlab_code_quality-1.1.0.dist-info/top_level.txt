@@ -1,0 +1,1 @@
+mypy_gitlab_code_quality

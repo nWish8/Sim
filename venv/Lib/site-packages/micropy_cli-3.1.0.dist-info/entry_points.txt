@@ -1,0 +1,3 @@
+[console_scripts]
+micropy = micropy.cli:cli
+

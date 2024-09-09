@@ -1,0 +1,102 @@
+Metadata-Version: 2.1
+Name: mypy-gitlab-code-quality
+Version: 1.1.0
+Summary: Simple script to generate gitlab code quality report from output of mypy.
+Author: OokamiTheLord
+Author-email: Dmitry Samsonov <dmitriy.samsonov28@gmail.com>
+License: MIT License
+        
+        Copyright (c) 2021 Dmitry Samsonov
+        
+        Permission is hereby granted, free of charge, to any person obtaining a copy
+        of this software and associated documentation files (the "Software"), to deal
+        in the Software without restriction, including without limitation the rights
+        to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+        copies of the Software, and to permit persons to whom the Software is
+        furnished to do so, subject to the following conditions:
+        
+        The above copyright notice and this permission notice shall be included in all
+        copies or substantial portions of the Software.
+        
+        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+        IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+        FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+        AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+        LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+        OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+        SOFTWARE.
+        
+Project-URL: Homepage, https://github.com/soul-catcher/mypy-gitlab-code-quality
+Project-URL: Bug Tracker, https://github.com/soul-catcher/mypy-gitlab-code-quality/issues
+Keywords: gitlab,gitlab-ci,mypy,codequality
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+License-File: LICENSE
+
+![Gitlab-CI](https://img.shields.io/badge/GitLab_CI-indigo?logo=gitlab)
+![PyPI - Python Version](https://img.shields.io/pypi/pyversions/mypy-gitlab-code-quality)
+[![PyPI](https://img.shields.io/pypi/v/mypy-gitlab-code-quality)](https://pypi.org/project/mypy-gitlab-code-quality/)
+[![Downloads](https://static.pepy.tech/badge/mypy-gitlab-code-quality/month)](https://pepy.tech/project/mypy-gitlab-code-quality)
+![PyPI - License](https://img.shields.io/pypi/l/mypy-gitlab-code-quality)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+
+# mypy-gitlab-code-quality
+Simple script to generate [gitlab code quality report](https://docs.gitlab.com/ee/user/project/merge_requests/code_quality.html)
+from output of [mypy](http://www.mypy-lang.org/).
+
+Example gitlab codequality report from [gitlab documentation](https://docs.gitlab.com/ee/user/project/merge_requests/code_quality.html#code-quality-widget):
+![Example gitlab codequality report](https://docs.gitlab.com/ee/ci/testing/img/code_quality_widget_13_11.png)
+
+# Usage
+`$ mypy program.py | mypy-gitlab-code-quality`
+
+This command send to `STDOUT` generated json that can be used as Code Quality report artifact.
+
+## Example .gitlab-ci.yml
+```yaml
+image: python:alpine
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+cache:
+  paths:
+    - .cache/pip/
+    - venv/
+    - .mypy_cache/
+
+before_script:
+  - python --version  # For debugging
+  - python -m venv venv
+  - . venv/bin/activate
+
+codequality:
+  script:
+    - pip install mypy mypy-gitlab-code-quality
+    - mypy program.py --no-error-summary > mypy-out.txt || true  # "|| true" is used for preventing job fail when mypy find errors
+    - mypy-gitlab-code-quality < mypy-out.txt > codequality.json
+  artifacts:
+    when: always
+    reports:
+      codequality: codequality.json
+```
+Note: if you want to use this example you should replace `program.py` with yours module names.
+
+# Contributing
+Please run linters before creating merge request
+```shell
+pip install requirements/dev.txt
+black .
+mypy .
+ruff .
+```
+Suggestions and merge requests are always welcome :)

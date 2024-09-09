@@ -1,0 +1,77 @@
+{
+    "type": "object",
+    "required": [
+        "name",
+        "repo",
+        "firmware",
+        "modules",
+        "devices",
+        "versions"
+    ],
+    "properties": {
+        "scope": {
+            "type": "string"
+        },
+        "name": {
+            "type": "string"
+        },
+        "repo": {
+            "type": "string"
+        },
+        "module_path": {
+            "type": ["string", "array"]
+        },
+        "firmware": {
+            "type": "string"
+        },
+        "excluded_modules": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        },
+        "modules": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        },
+        "devices": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        },
+        "path": {
+            "type": "string"
+        },
+        "versions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["version", "git_tag", "sha", "latest", "devices"],
+                "properties": {
+                    "version": {
+                        "type": "string"
+                    },
+                    "git_tag": {
+                        "type": "string"
+                    },
+                    "sha": {
+                        "type": "string"
+                    },
+                    "latest": {
+                        "type": "boolean",
+                        "default": false
+                    },
+                    "devices": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

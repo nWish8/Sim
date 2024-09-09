@@ -1,0 +1,5 @@
+[console_scripts]
+mpflash=mpflash.cli_main:mpflash
+mpremote=mpremote.main:main
+stubber=stubber.stubber:stubber_cli
+

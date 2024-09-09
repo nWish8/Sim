@@ -1,0 +1,63 @@
+Detailed Summary of Intended Network Operation:
+1. Initial Setup:
+Network Components:
+Gateway Node: Central node that initiates data requests.
+Sensor Nodes: Distributed nodes that respond to requests and collect data.
+Metrics Measured: Each sensor node measures battery level, RSSI (Received Signal Strength Indicator), and distance to other nodes.
+Clock Synchronization: Nodes synchronize their clocks using data from the gateway.
+
+2. Route Request (RREQ) Propagation:
+Initiation by Gateway:
+
+The gateway node periodically broadcasts a Route Request (RREQ) message to all neighboring nodes.
+The RREQ message contains:
+Clock Data: For synchronization purposes.
+Sender Node ID: Identifier of the node sending the RREQ.
+Cost to Gateway: Calculated using metrics measured at the sender node (battery level, RSSI, distance).
+
+Reception by Neighboring Nodes:
+Neighboring nodes receive the RREQ message.
+Each node updates its own cost to the gateway using the received cost and its own metrics (battery level, RSSI from sender, distance from sender).
+Nodes add the node id and its associated cost to their neighbor table.
+
+Forwarding RREQ:
+Nodes propagate the RREQ to their own neighbors, further spreading the request through the network.
+If a node receives an RREQ more than once i.e from different nodes:
+It updates its neighbor table with the new node id and associated cost.
+No additional RREQ is sent to avoid recursive transmissions.
+
+3. Route Reply (RREP) Propagation:
+
+Listening for RREP:
+After sending an RREQ, each node listens for Route Reply (RREP) messages from its neighbors.
+Nodes prepare to send their own RREP message, incorporating data packets from recieved RREP's if necessary.
+
+Scheduling RREP:
+The timing for sending an RREP message is determined by the node's calculated cost to the gateway.
+Nodes wait for the scheduled time before sending the RREP to ensure orderly and efficient transmission.
+
+Forwarding RREP:
+The RREP message is transmitted to the neighboring node with the lowest cost to the gateway.
+This process continues until the RREP reaches the gateway node.
+
+4. Data Flow:
+
+Request Propagation:
+The gateway's RREQ message spreads through the network, reaching all nodes.
+Nodes update their costs and neighbor tables as they receive RREQ messages.
+
+Reply Propagation:
+Nodes send RREP messages back to the gateway along the lowest-cost routes.
+The gateway collects RREP messages from various nodes, ensuring efficient data collection and synchronization.
+
+Benefits:
+Energy Efficiency: By calculating costs based on battery level, RSSI, and distance, nodes can choose the most efficient paths, conserving energy.
+Synchronization: Clock data in RREQ messages helps maintain synchronized operations across the network.
+Robustness: Updating neighbor tables with multiple RREQ receptions ensures nodes have the latest cost information, enhancing routing accuracy.
+Scalability: The protocol efficiently handles large networks by propagating requests and replies in a structured manner.
+
+Summary:
+Your network operates by having the gateway node periodically send out RREQ messages containing clock data, sender ID, and cost metrics.
+Neighboring nodes update their costs, forward the RREQ, and listen for RREP messages.
+Nodes then send RREP messages to neighbors with the lowest cost, eventually reaching the gateway.
+This ensures efficient data collection and synchronization across the network, optimizing energy usage and routing accuracy.

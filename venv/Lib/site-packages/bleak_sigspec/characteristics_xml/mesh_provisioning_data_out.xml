@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<!--Copyright 2017 Bluetooth SIG, Inc. All rights reserved.-->
+<Characteristic xsi:noNamespaceSchemaLocation="http://schemas.bluetooth.org/Documents/characteristic.xsd" name="Mesh Provisioning Data Out" type="org.bluetooth.characteristic.mesh_provisioning_data_out" uuid="2ADC" last-modified="2017-07-11" approved="Yes" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <InformativeText>
+    <Abstract>
+The Mesh Provisioning Data Out characteristic can be notified to send a Proxy PDU message containing Provisioning PDU from a Provisioning Server to a Provisioning Client.</Abstract>
+  </InformativeText>
+  <Value>
+    <Field name="Provisioning PDU">
+      <InformativeText>The characteristic value is 66 octets long to accommodate the longest known Proxy PDU message containing Provisioning PDU.</InformativeText>
+      <Format>struct</Format>
+    </Field>
+  </Value>
+</Characteristic>
