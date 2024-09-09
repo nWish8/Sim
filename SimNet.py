@@ -22,8 +22,9 @@ class MyNode(wsp.LayeredNode):
         '''
         super().init()
         self.cntr = 0
-        self.neighbor_table = {}  # Dictionary to store neighbors and their costs
-        self.cost = 1
+        self.neighbor_table = {}  # Dictionary to store neighbors their overheads and path
+        self.overhead = 1
+        self.path = 0
         self.clk_offset = 0  # Clock offset for synchronization
         self.strt_flag = False
         self.branch_flag = False
@@ -41,8 +42,8 @@ class MyNode(wsp.LayeredNode):
             self.cntr = 0
             yield self.timeout(1)
             while True:
-                self.send_rreq(self.id, self.cntr, self.cost, sim.env.now)
-                self.log(f"RREQ sent from {self.id}")
+                self.send_dreq(self.id, self.cntr, self.overhead, self.path, sim.env.now)
+                self.log(f"DREQ sent from {self.id}")
                 yield self.timeout(180)
                 self.scene.clearlinks()
                 self.log(f"COMPLETE")
@@ -52,43 +53,43 @@ class MyNode(wsp.LayeredNode):
     ###########################################################
     def delay(self):
         '''
-        Returns a delay based on the cost function.
+        Returns a delay based on the overhead function.
         '''
-        return 0.2 + (2*num_nodes) / (self.cost+3)
+        return 0.2 + (2*num_nodes) / (self.overhead+3)
     
     ###########################################################
     def branchdelay(self):
         '''
-        Returns a delay based on the cost function.
+        Returns a delay based on the overhead function.
         '''
         return (self.delayCache[1]/(num_nodes-2))/self.delayCache[2]
 
     ###################
-    def send_rreq(self, src, cntr, cost, clk):
+    def send_dreq(self, src, cntr, overhead, path, clk):
         '''
-        Send a Route Request (RREQ) message to broadcast address.
+        Send a Data Request (DREQ) message to broadcast address.
         '''
-        self.send(wsp.BROADCAST_ADDR, msg='rreq', src=src, cntr=cntr, cost=cost, clk=clk)
+        self.send(wsp.BROADCAST_ADDR, msg='dreq', src=src, cntr=cntr, overhead=overhead, path=path, clk=clk)
 
     ###################
-    def send_rreply(self, src):
+    def send_dreply(self, src):
         '''
-        Send a Route Reply (RREP) message to the previous node.
+        Send a Data Reply (DREP) message to the lowest overhead node.
         '''
         if self.id != GATEWAY:
             self.scene.nodecolor(self.id, 0, 0.7, 0)  # Set the color of the node to green
             self.scene.nodewidth(self.id, 2)
         next = min(self.neighbor_table, key=self.neighbor_table.get)
-        self.send(next, msg='rreply', src=src)
+        self.send(next, msg='dreply', src=src)
 
     ###################
     def send_data(self, src, seq):
         '''
-        Forward data packets to the next node in the lowest cost route.
+        Forward data packets to the next node in the lowest overhead route.
         '''
         
-        # Get the index of the lowest cost neighbor
-        next = self.lowestCostNeighbor()
+        # Get the index of the lowest overhead neighbor
+        next = self.lowestoverheadNeighbor()
         
         # Forward the data packet to the next node
         self.send(next, msg='data', src=src, seq=seq)
@@ -103,50 +104,62 @@ class MyNode(wsp.LayeredNode):
         Handle received messages and act based on the message type.
         '''
 
-        if msg == 'rreq':
+        if msg == 'dreq':
             if kwargs['cntr'] != self.cntr:
                 self.cntr = kwargs['cntr']
                 self.neighbor_table = {}
-                self.cost = 1
+                self.overhead = 1
+                self.path = 0
                 self.delayCache = {}
                 self.branch_flag = False
                 self.strt_flag = False
                 self.dataCache = ""
 
             if self.id == GATEWAY: return # If this node is the gateway, return
-            new_cost = self.calculate_cost() + kwargs['cost']  # Calculate node cost
-            
-            if not self.neighbor_table : # First RREQ message received
-                self.neighbor_table[sender] = kwargs['cost'] # Add the sender to the neighbor table
-                self.scene.addlink(sender, self.id, "parent") # Add a link between the sender and this node
-                self.cost = new_cost  # Update the node's cost to the gateway
+            new_overhead = self.calculate_overhead() + kwargs['overhead']  # Calculate node overhead
+
+            if not self.neighbor_table :        # First DREQ message received
+                self.neighbor_table[sender] = {     # Update the neighbor table
+                    'overhead': kwargs['overhead'],     # Store the overhead
+                    'path': kwargs['path']              # Store the path
+                }
+                self.overhead = new_overhead        # Update self.overhead
+                self.path = sender                  # Update self.path
+
+                self.scene.addlink(sender, self.id, "parent") # Sim: Add a link between the sender and this node
+
                 yield self.timeout(randdelay())
-                self.send_rreq(src, self.cntr, self.cost, sim.env.now) # Forward the RREQ message
-                self.strt_flag = True
-                self.dataCache = f"Path : {self.id}"
-                #self.timeout(num_nodes*0.3)
+                self.send_dreq(src, self.cntr, self.overhead, self.path, sim.env.now) # Forward the RREQ message to neighbors
+
+                self.strt_flag = True # Set the start flag to True
+                self.dataCache = f"Path : {self.id}" # Initialize the data cache
                 self.data_reply()  # Start the reply process
 
-            if self.neighbor_table:  # Node has received a RREQ message before
-                if sender not in self.neighbor_table or kwargs['cost'] < self.neighbor_table[sender]:
-                    self.neighbor_table[sender] = kwargs['cost']  # Update the neighbor table
-                    self.scene.addlink(sender, self.id, "parent")
+            if self.neighbor_table:  # Node has received a DREQ message before
+                if sender not in self.neighbor_table or kwargs['overhead'] < self.neighbor_table[sender]['overhead']:
+                    self.neighbor_table[sender] = {             # Update the neighbor table
+                        'overhead': kwargs['overhead'],             # Store the neighbor's overhead
+                        'path': kwargs['path']                      # Store the neighbor's path
+                    }
+                    self.scene.addlink(sender, self.id, "parent") # Sim: Add a link between the sender and this node
 
-                    if kwargs['cost'] < self.neighbor_table[self.lowestCostNeighbor()]:
-                        self.cost = new_cost  # Update Node cost
+                    if kwargs['overhead'] < self.neighbor_table[self.lowestoverheadNeighbor()]['overhead']:
+                        self.overhead = new_overhead  # Update Node overhead
+                        self.path = sender            # Update Node path
+
                         yield self.timeout(randdelay())
-                        self.send_rreq(src, self.cntr, self.cost, sim.env.now)  # Forward the RREQ message
+                        self.send_dreq(src, self.cntr, self.overhead, self.path, sim.env.now)  # Forward the DREQ message
+
                         self.strt_flag = False
                         yield self.timeout(self.delayCache[1])
                         self.strt_flag = True
-                        init = f"Path : {self.id}"
                         self.data_reply() # Start the reply process again
 
 
-        elif msg == 'rreply':
+        elif msg == 'dreply':
             self.next = sender
             if self.id == GATEWAY:
-                self.log(f"Receive RREP from {src}")
+                self.log(f"Received DREP from {src}")
                 yield self.timeout(5)
                 self.log("Start sending data")
                 #self.start_process(self.start_send_data())
@@ -208,33 +221,42 @@ class MyNode(wsp.LayeredNode):
             self.delayCache[0] = self.now
             self.delayCache[1] = self.delay()
             self.delayCache[2] = 1
-        self.log(f"Data Reply: Reply cache {self.delayCache} $ {self.cost}")
+        self.log(f"Data Reply: Reply cache {self.delayCache} $ {self.overhead}")
         self.delayed_exec(self.delayCache[1], start)
 
     ###################
-    def lowestCostNeighbor(self):
+    def lowestoverheadNeighbor(self):
         '''
-        Returns the neighbor with the lowest cost
+        Returns the neighbor with the lowest overhead
         '''
-        # self.log(f"Neighbor table: {self.neighbor_table}")
-        return min(self.neighbor_table, key=self.neighbor_table.get)
+        return min(self.neighbor_table, key=lambda n: self.neighbor_table[n]['overhead'])
+
     
     ###################
-    def highestCostNeighbor(self):
+    def highestoverheadNeighbor(self):
         '''
-        Returns the neighbor with the highest cost
+        Returns the neighbor with the highest overhead
         '''
-        return max(self.neighbor_table, key=self.neighbor_table.get)
+        return max(self.neighbor_table, key=lambda n: self.neighbor_table[n]['overhead'])
 
     ###################
-    def calculate_cost(self):
+    def calculate_overhead(self):
         '''
-        Dummy cost calculation.
+        Dummy overhead calculation.
         '''
         battery_level = 0.85  # Simulate battery level
         rssi = 0.7  # Simulate RSSI in -dBm
         distance = 40/50  # Simulate distance
-        return (battery_level + rssi + distance)/3  # Calculate and return the cost
+        return (battery_level + rssi + distance)/3  # Calculate and return the overhead
+    
+    ###################
+    def isEdgeNode(self):
+        '''
+        Determine if the node is an edge node by checking the path of all neighbors.
+        The node is an edge node, self.id will not be the path of any neighbor in the neighbor table.
+        Returns True if the node is an edge node, False otherwise.
+        '''
+        return self.id not in self.neighbor_table
 
 ###########################################################
 sim = wsp.Simulator(
