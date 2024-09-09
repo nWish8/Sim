@@ -77,9 +77,7 @@ class MyNode(wsp.LayeredNode):
         '''
         Send a Data Reply (DREP) message to the lowest overhead node.
         '''
-        # if self.id != GATEWAY:
-        #     self.scene.nodecolor(self.id, 0, 0.7, 0)  # Set the color of the node to green
-        #     self.scene.nodewidth(self.id, 2)
+
         self.send(self.path, msg='dreply', src=src, data=data)
         self.strt_flag = False
         self.branch_flag = False
@@ -198,7 +196,6 @@ class MyNode(wsp.LayeredNode):
                 self.log(f"SENT: data reply to node {self.path} : {self.dataCache} $$$ {self.overhead}")
 
         if self.branch_flag == False:
-            #self.log(f"Data Reply: branch_flag False")
             self.delayCache[0] = self.now
             self.delayCache[1] = self.delay()
             self.delayCache[2] = 1
