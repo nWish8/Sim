@@ -35,8 +35,8 @@ class MyNode(wsp.LayeredNode):
         self.clk_offset = 0  # Clock offset for synchronization
         self.strt_flag = False
         self.branch_flag = False
-        self.delay = {}
         self.dataCache = {}
+        self.delay = {}
 
     ###################
     def run(self):
@@ -160,26 +160,24 @@ class MyNode(wsp.LayeredNode):
         elif msg == 'dreply':
             self.log(f"RECIEVED: DREP from {sender}")
 
+            self.dataCacheUpdate() # Add own data to the dataCache
+
             # Add the data to the cache by merging dictionaries
             self.dataCache.update(data)
 
-            
             self.neighbor_table.setdefault(sender, {})['rx'] = 1 # Update neighbor packets received
 
             # Log the neighbor table entries where 'path' == self.id
-            matching_neighbors = {key: neighbor for key, neighbor in self.neighbor_table.items() if neighbor.get('path') == self.id}
+            branches = {key: neighbor for key, neighbor in self.neighbor_table.items() if neighbor.get('path') == self.id}
 
-            # Filter neighbors where 'path' == self.id and check if they all have 'rx' == 1
-            if all(neighbor.get('rx', 0) == 1 for neighbor in self.neighbor_table.values() if neighbor.get('path') == self.id):
-                
-                self.dataCacheUpdate() # Add own data to the dataCache
+            # Check if all branches have 'rx' == 1
+            if all(neighbor.get('rx', 0) == 1 for neighbor in branches.values()):
 
                 if self.id != GATEWAY: # If this node is not the gateway
                     yield self.timeout(randdelay())  # Wait for a random delay
                     self.send_dreply(self.id, self.dataCache)  # Send the data packet to the next node
 
                 else:   # If this node is the gateway
-                    self.dataCacheUpdate() # Add data to the dataCache
 
                     if len(self.dataCache) == num_nodes:
                         self.log(f"#{self.cntr} : All Data Received")
@@ -189,8 +187,9 @@ class MyNode(wsp.LayeredNode):
                         self.log(self.dataCache)
 
             else: 
-                self.delay[1] += 1
-                self.log(f"WAITING FOR: {', '.join(map(str, matching_neighbors.keys()))}")
+                # Unrecieved branches
+                pendingBranches = [key for key, neighbor in branches.items() if neighbor.get('rx', 0) == 0]
+                self.log(f"WAITING FOR: {pendingBranches}")
 
 
     ###################
