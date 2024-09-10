@@ -36,7 +36,6 @@ class MyNode(wsp.LayeredNode):
         self.strt_flag = False
         self.branch_flag = False
         self.dataCache = {}
-        self.delay = {}
 
     ###################
     def run(self):
@@ -58,13 +57,6 @@ class MyNode(wsp.LayeredNode):
                 self.scene.clearlinks()
                 yield self.timeout(5)
                 self.cntr += 1
-
-    ###########################################################
-    def branchdelay(self):
-        '''
-        Returns a delay based on the overhead function.
-        '''
-        return (self.delay[1]/(num_nodes-2))/self.delay[2]
 
     ###################
     def send_dreq(self, src, cntr, overhead, path, clk):
@@ -107,7 +99,6 @@ class MyNode(wsp.LayeredNode):
                 self.branch_flag = False
                 self.strt_flag = False
                 self.dataCache = {}
-                self.delay = {}
 
             if self.id == GATEWAY: # If this node is the gateway, update neighbor table and return
                 self.neighbor_table[sender] = {     # Update the neighbor table
@@ -152,7 +143,7 @@ class MyNode(wsp.LayeredNode):
                         self.send_dreq(sender, self.cntr, self.overhead, self.path, sim.env.now)  # Forward the DREQ message
 
                         self.strt_flag = False
-                        yield self.timeout(self.delay[0])
+                        yield self.timeout(DELAY)
                         self.strt_flag = True
                         self.start_reply() # Start the reply process again
 
@@ -213,10 +204,7 @@ class MyNode(wsp.LayeredNode):
                 yield self.timeout(randdelay())
                 self.send_dreply(self.id, self.dataCache)
 
-        if self.branch_flag == False:
-            self.delay[0] = DELAY
-            self.delay[1] = 1
-        self.delayed_exec(self.delay[0], start)
+        self.delayed_exec(DELAY, start)
 
     ###################
     def lowestoverheadNeighbor(self):
