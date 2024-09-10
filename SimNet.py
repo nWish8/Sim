@@ -34,7 +34,6 @@ class MyNode(wsp.LayeredNode):
         self.path = 0
         self.clk_offset = 0  # Clock offset for synchronization
         self.strt_flag = False
-        self.branch_flag = False
         self.dataCache = {}
 
     ###################
@@ -77,7 +76,6 @@ class MyNode(wsp.LayeredNode):
         json_data = json.dumps(dataCache).encode('utf-8')  # Encode data to JSON
 
         self.strt_flag = False
-        self.branch_flag = False
 
         self.send(self.path, msg='dreply', src=src, data=json_data)
         self.log(f"SENT: DREP to {self.path}")
@@ -96,7 +94,6 @@ class MyNode(wsp.LayeredNode):
                 self.neighbor_table = {}
                 self.overhead = 1
                 self.path = 0
-                self.branch_flag = False
                 self.strt_flag = False
                 self.dataCache = {}
 
