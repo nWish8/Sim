@@ -2,6 +2,7 @@ import random
 import wsnsimpy.wsnsimpy_tk as wsp
 
 GATEWAY = 0
+DELAY = 2
 num_nodes = 25
 
 ###########################################################
@@ -29,7 +30,7 @@ class MyNode(wsp.LayeredNode):
         self.clk_offset = 0  # Clock offset for synchronization
         self.strt_flag = False
         self.branch_flag = False
-        self.delayCache = {}
+        self.delay = {}
         self.dataCache = {}
 
     ###################
@@ -52,18 +53,11 @@ class MyNode(wsp.LayeredNode):
                 self.cntr += 1
 
     ###########################################################
-    def delay(self):
-        '''
-        Returns a delay based on the overhead function.
-        '''
-        return 0.2 + (1.5*num_nodes) / (self.overhead+6)
-    
-    ###########################################################
     def branchdelay(self):
         '''
         Returns a delay based on the overhead function.
         '''
-        return (self.delayCache[1]/(num_nodes-2))/self.delayCache[2]
+        return (self.delay[1]/(num_nodes-2))/self.delay[2]
 
     ###################
     def send_dreq(self, src, cntr, overhead, path, clk):
@@ -96,7 +90,7 @@ class MyNode(wsp.LayeredNode):
                 self.neighbor_table = {}
                 self.overhead = 1
                 self.path = 0
-                self.delayCache = {}
+                self.delay = {}
                 self.branch_flag = False
                 self.strt_flag = False
                 self.dataCache = ""
@@ -139,7 +133,7 @@ class MyNode(wsp.LayeredNode):
                         self.send_dreq(src, self.cntr, self.overhead, self.path, sim.env.now)  # Forward the DREQ message
 
                         self.strt_flag = False
-                        yield self.timeout(self.delayCache[1])
+                        yield self.timeout(self.delay[0])
                         self.strt_flag = True
                         self.start_reply() # Start the reply process again
 
@@ -168,6 +162,7 @@ class MyNode(wsp.LayeredNode):
                     self.send_dreply(self.id, self.dataCache)  # Send the data packet to the next node
 
                 else:
+                    self.delay[1] += 1
                     self.log(f"WAITING | {matching_neighbors}")
 
 
@@ -175,7 +170,10 @@ class MyNode(wsp.LayeredNode):
                 self.dataCache[self.id] = f"data" # Add own data to the dataCache
 
                 if len(self.dataCache) == num_nodes:
-                    self.log(f"#{self.cntr} : Collection Success")
+                    self.log(f"#{self.cntr} : All Data Received")
+                else:
+                    self.log(f"#{self.cntr} : Partial Data Received")
+                    self.log(f"#{len(self.dataCache)} / {num_nodes} Node Data Received")
 
     ###################
     def delayed_exec(self, delay, func, *args, **kwargs):
@@ -196,10 +194,9 @@ class MyNode(wsp.LayeredNode):
                 self.send_dreply(self.id, self.dataCache)
 
         if self.branch_flag == False:
-            self.delayCache[0] = self.now
-            self.delayCache[1] = self.delay()
-            self.delayCache[2] = 1
-        self.delayed_exec(self.delayCache[1], start)
+            self.delay[0] = DELAY
+            self.delay[1] = 1
+        self.delayed_exec(self.delay[0], start)
 
     ###################
     def lowestoverheadNeighbor(self):
