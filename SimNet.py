@@ -1,7 +1,9 @@
 import random
+import json
 import wsnsimpy.wsnsimpy_tk as wsp
 
 GATEWAY = 0
+INTERVAL = 60
 DELAY = 2
 num_nodes = 25
 
@@ -14,14 +16,17 @@ def randdelay():
 
 ###########################################################
 class MyNode(wsp.LayeredNode):
-    tx_range = 75  # Transmission range of the node
 
     ###################
     def init(self):
         '''
-        Initialize the node, setting previous node to None.
+        Initialize the node.
         '''
         super().init()
+
+        # ID = mac addess of the node
+        #self.id = network.WLAN(network.STA_IF).config('mac')
+
         self.cntr = 0
         self.neighbor_table = {}  # Dictionary to store neighbors their overheads and path
         self.recieved_dreply = {} # Dictionary to store recieved data packets
@@ -36,19 +41,21 @@ class MyNode(wsp.LayeredNode):
     ###################
     def run(self):
         '''
-        Main loop for the node. Sets the color and width of the node based on its role (SOURCE, DEST, or other).
+        Main loop for Node.
         '''
         if self.id == GATEWAY:
             self.scene.nodecolor(self.id, 0, 0, 1)  # Set the color of the source node to blue
             self.scene.nodewidth(self.id, 2)
-            self.cntr = 0
+
             yield self.timeout(1)
             while True:
+                self.log(f"STARTING")
                 self.send_dreq(self.id, self.cntr, self.overhead, self.path, sim.env.now)
-                self.log(f"DREQ sent from {self.id}")
-                yield self.timeout(180)
-                self.scene.clearlinks()
+
+                yield self.timeout(INTERVAL)
                 self.log(f"COMPLETE")
+
+                self.scene.clearlinks()
                 yield self.timeout(5)
                 self.cntr += 1
 
@@ -64,44 +71,57 @@ class MyNode(wsp.LayeredNode):
         '''
         Send a Data Request (DREQ) message to broadcast address.
         '''
-        self.send(wsp.BROADCAST_ADDR, msg='dreq', src=src, cntr=cntr, overhead=overhead, path=path, clk=clk)
+        data = {'msg': 'dreq', 'src': src, 'cntr': cntr, 'overhead': overhead, 'path': path, 'clk': clk}
+        json_data = json.dumps(data).encode('utf-8')  # Encode data to JSON
+
+        self.send(wsp.BROADCAST_ADDR, msg='dreq', data=json_data)
         self.log(f"SENT: DREQ from {self.id}")
 
     ###################
-    def send_dreply(self, src, data):
+    def send_dreply(self, src, dataCache):
         '''
         Send a Data Reply (DREP) message to the lowest overhead node.
         '''
+        json_data = json.dumps(dataCache).encode('utf-8')  # Encode data to JSON
+
         self.strt_flag = False
         self.branch_flag = False
-        #self.log(f"NeighborTable | {self.neighbor_table}")
-        self.send(self.path, msg='dreply', src=src, data=data)
+
+        self.send(self.path, msg='dreply', src=src, data=json_data)
         self.log(f"SENT: DREP to {self.path}")
 
     ###################
-    def on_receive(self, sender, msg, src, **kwargs):
+    def on_receive(self, sender, msg, **kwargs):
         '''
         Handle received messages and act based on the message type.
         '''
+        data = json.loads(kwargs['data'].decode('utf-8'))  # Convert the received data from JSON
 
+        
         if msg == 'dreq':
-            if kwargs['cntr'] != self.cntr:
-                self.cntr = kwargs['cntr']
+            if data['cntr'] != self.cntr:
+                self.cntr = data['cntr']
                 self.neighbor_table = {}
                 self.overhead = 1
                 self.path = 0
-                self.delay = {}
                 self.branch_flag = False
                 self.strt_flag = False
-                self.dataCache = ""
+                self.dataCache = {}
+                self.delay = {}
 
-            if self.id == GATEWAY: return # If this node is the gateway, return
-            new_overhead = self.calculate_overhead() + kwargs['overhead']  # Calculate node overhead
+            if self.id == GATEWAY: # If this node is the gateway, update neighbor table and return
+                self.neighbor_table[sender] = {     # Update the neighbor table
+                    'overhead': data['overhead'],     # Store the overhead
+                    'path': data['path'],             # Store the path
+                    'rx': 0}                         # Store the number of packets received
+                return
+            
+            new_overhead = self.calculate_overhead() + data['overhead']  # Calculate node overhead
 
             if not self.neighbor_table :        # First DREQ message received
                 self.neighbor_table[sender] = {     # Update the neighbor table
-                    'overhead': kwargs['overhead'],     # Store the overhead
-                    'path': kwargs['path'],             # Store the path
+                    'overhead': data['overhead'],     # Store the overhead
+                    'path': data['path'],             # Store the path
                     'rx': 0                             # Store the number of packets received
                 }
                 self.overhead = new_overhead        # Update self.overhead
@@ -110,27 +130,26 @@ class MyNode(wsp.LayeredNode):
                 self.scene.addlink(sender, self.id, "parent") # Sim: Add a link between the sender and this node
 
                 yield self.timeout(randdelay())
-                self.send_dreq(src, self.cntr, self.overhead, self.path, sim.env.now) # Forward the RREQ message to neighbors
+                self.send_dreq(sender, self.cntr, self.overhead, self.path, sim.env.now) # Forward the RREQ message to neighbors
 
                 self.strt_flag = True # Set the start flag to True
-                self.dataCache[self.id] = f"data" # Initialize the data cache
                 self.start_reply()  # Start the reply process
 
             if self.neighbor_table:  # Node has received a DREQ message before
-                if sender not in self.neighbor_table or kwargs['overhead'] < self.neighbor_table[sender]['overhead']:
+                if sender not in self.neighbor_table or data['overhead'] < self.neighbor_table[sender]['overhead']:
                     self.neighbor_table[sender] = {             # Update the neighbor table
-                        'overhead': kwargs['overhead'],             # Store the neighbor's overhead
-                        'path': kwargs['path'],                     # Store the neighbor's path
+                        'overhead': data['overhead'],             # Store the neighbor's overhead
+                        'path': data['path'],                     # Store the neighbor's path
                         'rx': 0                                     # Store the number of packets received
                     }
                     self.scene.addlink(sender, self.id, "parent") # Sim: Add a link between the sender and this node
 
-                    if kwargs['overhead'] < self.neighbor_table[self.lowestoverheadNeighbor()]['overhead']:
+                    if data['overhead'] < self.neighbor_table[self.lowestoverheadNeighbor()]['overhead']:
                         self.overhead = new_overhead  # Update Node overhead
                         self.path = sender            # Update Node path
 
                         yield self.timeout(randdelay())
-                        self.send_dreq(src, self.cntr, self.overhead, self.path, sim.env.now)  # Forward the DREQ message
+                        self.send_dreq(sender, self.cntr, self.overhead, self.path, sim.env.now)  # Forward the DREQ message
 
                         self.strt_flag = False
                         yield self.timeout(self.delay[0])
@@ -142,38 +161,37 @@ class MyNode(wsp.LayeredNode):
             self.log(f"RECIEVED: DREP from {sender}")
 
             # Add the data to the cache by merging dictionaries
-            self.dataCache.update(kwargs['data'])  # or use {**self.dataCache, **kwargs['data']}
+            self.dataCache.update(data)
 
-            if self.id != GATEWAY:     
+            
+            self.neighbor_table.setdefault(sender, {})['rx'] = 1 # Update neighbor packets received
+
+            # Log the neighbor table entries where 'path' == self.id
+            matching_neighbors = {key: neighbor for key, neighbor in self.neighbor_table.items() if neighbor.get('path') == self.id}
+
+            # Filter neighbors where 'path' == self.id and check if they all have 'rx' == 1
+            if all(neighbor.get('rx', 0) == 1 for neighbor in self.neighbor_table.values() if neighbor.get('path') == self.id):
                 
-                self.neighbor_table.setdefault(sender, {})['rx'] = 1
+                self.dataCacheUpdate() # Add own data to the dataCache
 
-                # Log the neighbor table entries where 'path' == self.id
-                matching_neighbors = {key: neighbor for key, neighbor in self.neighbor_table.items() if neighbor.get('path') == self.id}
-                #self.log(f"Matching Neighbors (path == self.id): {matching_neighbors}")
-
-
-                # Filter neighbors where 'path' == self.id and check if they all have 'rx' == 1
-                if all(neighbor.get('rx', 0) == 1 for neighbor in self.neighbor_table.values() if neighbor.get('path') == self.id):
-                    
-                    self.dataCache[self.id] = f"data" # Add own data to the dataCache
-
+                if self.id != GATEWAY: # If this node is not the gateway
                     yield self.timeout(randdelay())  # Wait for a random delay
                     self.send_dreply(self.id, self.dataCache)  # Send the data packet to the next node
 
-                else:
-                    self.delay[1] += 1
-                    self.log(f"WAITING | {matching_neighbors}")
+                else:   # If this node is the gateway
+                    self.dataCacheUpdate() # Add data to the dataCache
 
+                    if len(self.dataCache) == num_nodes:
+                        self.log(f"#{self.cntr} : All Data Received")
+                    else:
+                        self.log(f"Count:{self.cntr} : Partial Data Received")
+                        self.log(f"{len(self.dataCache)} / {num_nodes} Node Data Received")
+                        self.log(self.dataCache)
 
-            else:
-                self.dataCache[self.id] = f"data" # Add own data to the dataCache
+            else: 
+                self.delay[1] += 1
+                self.log(f"WAITING FOR: {', '.join(map(str, matching_neighbors.keys()))}")
 
-                if len(self.dataCache) == num_nodes:
-                    self.log(f"#{self.cntr} : All Data Received")
-                else:
-                    self.log(f"#{self.cntr} : Partial Data Received")
-                    self.log(f"#{len(self.dataCache)} / {num_nodes} Node Data Received")
 
     ###################
     def delayed_exec(self, delay, func, *args, **kwargs):
@@ -190,7 +208,10 @@ class MyNode(wsp.LayeredNode):
                 self.scene.nodecolor(self.id, 1, 0, 0)
                 self.scene.nodewidth(self.id, 2)
 
+                self.dataCacheUpdate()  # Add own data to the dataCache
+
                 # Send the DREP message
+                yield self.timeout(randdelay())
                 self.send_dreply(self.id, self.dataCache)
 
         if self.branch_flag == False:
@@ -234,7 +255,25 @@ class MyNode(wsp.LayeredNode):
             if 'path' in neighbor and neighbor['path'] == self.id:
                 return False
         return True
+    
+    ###################
+    def dataCacheUpdate(self):
+        '''
+        Update the dataCache with the node's data.
+        '''
+        self.dataCache[self.id] = {
+            'temp': random.randint(20, 30), 
+            'hum': random.randint(40, 60)
+            }
+    
+    ############################
+    def log(self,msg):
+        print(f"Node {'#'+str(self.id):4}[{self.now:10.5f}] {msg}")
 
+    ############################
+    @property
+    def now(self):
+        return self.sim.env.now
 
 ###########################################################
 sim = wsp.Simulator(
