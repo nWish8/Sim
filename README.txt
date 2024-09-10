@@ -1,7 +1,6 @@
 wsnsimpy is unsupported on newer python versions
-python3.10.11 - working
+python3.10.11 - stable
 
-Open the virtual environment from terminal
+python -m venv venv
 .\venv\Scripts\activate
-
 pip install -r Requirements.txt
