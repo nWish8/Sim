@@ -24,9 +24,6 @@ class MyNode(wsp.LayeredNode):
         '''
         super().init()
 
-        # ID = mac addess of the node
-        #self.id = network.WLAN(network.STA_IF).config('mac')
-
         self.cntr = 0
         self.neighbor_table = {}  # Dictionary to store neighbors their overheads and path
         self.recieved_dreply = {} # Dictionary to store recieved data packets
