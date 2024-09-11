@@ -103,11 +103,9 @@ class MyNode(wsp.LayeredNode):
 
             if self.neighbor_table:  # Node has received a DREQ message before
                 if sender not in self.neighbor_table or data['overhead'] < self.neighbor_table[sender]['overhead']:
-                    self.neighbor_table[sender] = {             # Update the neighbor table
-                        'overhead': data['overhead'],             # Store the neighbor's overhead
-                        'path': data['path'],                     # Store the neighbor's path
-                        'rx': 0                                     # Store the number of packets received
-                    }
+
+                    self.updateNeighborTable(sender, data) # Update the neighbor table
+
                     self.scene.addlink(sender, self.id, "parent") # Sim: Add a link between the sender and this node
 
                     # Check if the new recieved overhead is less than the current lowest overhead neighbor
@@ -129,8 +127,7 @@ class MyNode(wsp.LayeredNode):
 
             self.dataCacheUpdate() # Add own data to the dataCache
 
-            # Add the data to the cache by merging dictionaries
-            self.dataCache.update(data)
+            self.dataCache.update(data) # Add the sent data to the dataCache by merging dictionaries
 
             self.neighbor_table.setdefault(sender, {})['rx'] = 1 # Update neighbor packets received
             
@@ -140,10 +137,11 @@ class MyNode(wsp.LayeredNode):
             # Check if all branches have 'rx' == 1
             if all(neighbor.get('rx', 0) == 1 for neighbor in branches.values()):
 
-                if self.id != GATEWAY: # If this node is not the gateway
-                    yield self.timeout(randdelay())  # Wait for a random delay
-                    self.send_dreply(self.id, self.dataCache)  # Send the data packet to the next node
-                else:
+                if self.id != GATEWAY: # If this node is not the gateway, forward the data packet
+                    yield self.timeout(randdelay())             # Wait for a random delay
+                    self.send_dreply(self.id, self.dataCache)   # Send the data packet to the next node
+
+                else:                                                   # Data has reached the gateway                   
                     self.log(f"RECEIVED data from connected nodes")
                     self.log(self.format_data_cache())
 
