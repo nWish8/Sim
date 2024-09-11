@@ -90,8 +90,9 @@ class MyNode(wsp.LayeredNode):
 
             if not self.neighbor_table :            # First DREQ message received
                 self.updateNeighborTable(sender, data) # Update the neighbor table
-                self.overhead = self.calculate_overhead() + data['overhead']  # Calculate node overhead            # Update self.overhead
-                self.path = sender                      # Update self.path
+                self.overhead = self.calculate_overhead() + data['overhead']  # Calculate node overhead
+                if self.id != GATEWAY:
+                    self.path = sender                      # Update self.path
 
                 self.scene.addlink(sender, self.id, "parent") # Sim: Add a link between the sender and this node
 
@@ -111,7 +112,8 @@ class MyNode(wsp.LayeredNode):
                     # Check if the new recieved overhead is less than the current lowest overhead neighbor
                     if data['overhead'] < self.neighbor_table[self.lowestoverheadNeighbor()]['overhead']:
                         self.overhead = self.calculate_overhead() + data['overhead']  # Update Node overhead
-                        self.path = sender            # Update Node path
+                        if self.id != GATEWAY:
+                            self.path = sender                      # Update self.path
 
                         yield self.timeout(randdelay())
                         self.send_dreq(sender, self.txCounter, self.pos, self.rssi, self.overhead, self.path, sim.env.now)  # Forward the DREQ message
@@ -145,6 +147,8 @@ class MyNode(wsp.LayeredNode):
                     self.log(f"RECEIVED data from connected nodes")
                     self.log(self.format_data_cache())
 
+                    self.neighbor_table = {} # Reset the Gateway neighbor table
+
 
             else: 
                 # Unrecieved branches
@@ -157,6 +161,7 @@ class MyNode(wsp.LayeredNode):
         if data['txCounter'] != self.txCounter:
             self.txCounter = data['txCounter']
             self.neighbor_table = {}
+            self.rssi = 0
             self.overhead = 1
             self.path = 0
             self.strt_flag = False
@@ -237,9 +242,10 @@ class MyNode(wsp.LayeredNode):
     ###################
     def dataCacheUpdate(self):
         '''
-        Update the dataCache with the node's data.
+        Update the dataCache with the collected data.
         '''
         self.dataCache[str(self.id)] = {
+            'time': self.now,
             'id': str(self.id),
             'pos': str(self.pos),
             'temp': random.randint(20, 30), 
@@ -256,12 +262,12 @@ class MyNode(wsp.LayeredNode):
         Returns a formatted string representation of the data cache with aligned columns.
         '''
         formatted_cache = []
-        header = f"DATA:\n{'Node':<8}\t{'ID':<5}\t{'Position':<20}\t{'Temp (°C)':<10}\t{'Hum (%)':<8}"
+        header = f"Tx:{self.txCounter} DATA:\n{'Time':<8}\t{'Node':<8}\t{'ID':<5}\t{'Position':<20}\t{'Temp (°C)':<10}\t{'Hum (%)':<8}"
         formatted_cache.append(header)
         formatted_cache.append('-' * 60)  # Divider line for better readability
 
         for node_id, data in self.dataCache.items():
-            formatted_data = f"{node_id:<8}\t{data['id']:<5}\t{str(data['pos']):<20}\t{data['temp']:<10}\t{data['hum']:<8}"
+            formatted_data = f"{round(data['time'],4):<5}\t{node_id:<8}\t{data['id']:<5}\t{data['pos']:<20}\t{data['temp']:<10}\t{data['hum']:<8}"
             formatted_cache.append(formatted_data)
 
         return "\n".join(formatted_cache)
