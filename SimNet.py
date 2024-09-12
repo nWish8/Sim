@@ -262,12 +262,12 @@ class MyNode(wsp.LayeredNode):
         Returns a formatted string representation of the data cache with aligned columns.
         '''
         formatted_cache = []
-        header = f"Tx:{self.txCounter} DATA:\n{'Time':<8}\t{'Node':<8}\t{'ID':<5}\t{'Position':<20}\t{'Temp (°C)':<10}\t{'Hum (%)':<8}"
+        header = f"Tx:{self.txCounter} DATA:\n{'Time':<12}{'Node':<12}{'ID':<8}{'Position':<25}{'Temp (°C)':<12}{'Hum (%)':<10}"
         formatted_cache.append(header)
         formatted_cache.append('-' * 60)  # Divider line for better readability
 
         for node_id, data in self.dataCache.items():
-            formatted_data = f"{round(data['time'],4):<5}\t{node_id:<8}\t{data['id']:<5}\t{data['pos']:<20}\t{data['temp']:<10}\t{data['hum']:<8}"
+            formatted_data = f"{data['time']:<12.4f}{node_id:<12}{data['id']:<8}{str(data['pos']):<25}{data['temp']:<12}{data['hum']:<10}"
             formatted_cache.append(formatted_data)
 
         return "\n".join(formatted_cache)
