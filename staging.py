@@ -1,11 +1,14 @@
+import network # type: ignore
+import espnow # type: ignore
+import utime # type: ignore
+import machine # type: ignore
 import random
 import json
-import wsnsimpy.wsnsimpy_tk as wsp
 
 GATEWAY = 0
 INTERVAL = 20
 DELAY = 2
-num_nodes = 25
+
 
 ###########################################################
 def randdelay():
@@ -15,14 +18,30 @@ def randdelay():
     return random.uniform(0.2, 0.6)
 
 ###########################################################
-class MyNode(wsp.LayeredNode):
+class MyNode():
 
     ###################
     def init(self):
         '''
         Initialize the node.
         '''
-        super().init()
+        # Sender logic
+        self.sta = network.WLAN(network.STA_IF)
+        self.sta.active(True)
+        self.sta.disconnect()
+
+        # Initialize ESP-NOW
+        self.esp = espnow.ESPNow()
+        self.esp.active(True)
+
+        # Add the broadcast address to the peer list for discovering receivers
+        self.broadcast_mac = b'\xff\xff\xff\xff\xff\xff'
+        self.esp.add_peer(self.broadcast_mac)
+
+        # Set self.id to the byte form of the MAC address
+        self.id = self.sta.config('mac')
+        print(f"Node ID: {self.id}")
+        self.pos = (random.randint(0, 10), random.randint(0, 10))  # Random position
 
         self.txCounter = 0
         self.neighbor_table = {}  # Dictionary to store neighbors their overheads and path
@@ -276,28 +295,8 @@ class MyNode(wsp.LayeredNode):
     ############################
     @property
     def now(self):
-        return self.sim.env.now
+        return utime.ticks_ms()/1000
 
-###########################################################
-sim = wsp.Simulator(
-    until=200,
-    timescale=0.5,
-    visual=True,
-    terrain_size=(350, 350),
-    title="SimNet")
 
-# Define a line style for parent links
-sim.scene.linestyle("parent", color=(0, 0.8, 0), arrow="head", width=2)
-
-# Place nodes in square grid
-
-for x in range(int(num_nodes ** 0.5)):
-    for y in range(int(num_nodes ** 0.5)):
-        px = 50 + x * 60 + random.uniform(-20, 20)
-        py = 50 + y * 60 + random.uniform(-20, 20)
-        node = sim.add_node(MyNode, (round(px,2), round(py,2)))
-        node.tx_range = 75
-        node.logging = True
-
-# Start the simulation
-sim.run()
+node = MyNode()
+node.init()
