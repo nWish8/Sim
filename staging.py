@@ -1,56 +1,39 @@
-import network # type: ignore
-import espnow # type: ignore
-import utime # type: ignore
-import machine # type: ignore
 import random
 import json
+import wsnsimpy.wsnsimpy_tk as wsp
 
 GATEWAY = 0
-INTERVAL = 20
+INTERVAL = 20  # Matching the actual model interval
 DELAY = 2
-
+REPLY_TIMEOUT = 15  # Consistent with the actual model
+num_nodes = 25
 
 ###########################################################
 def randdelay():
     '''
-    Returns a random delay between 0.2 and 0.6 seconds.
+    Returns a random delay between 0.2 and 0.8 seconds.
     '''
-    return random.uniform(0.2, 0.6)
+    return random.uniform(0.2, 0.8)
 
 ###########################################################
-class MyNode():
+class MyNode(wsp.LayeredNode):
 
     ###################
     def init(self):
         '''
         Initialize the node.
         '''
-        # Sender logic
-        self.sta = network.WLAN(network.STA_IF)
-        self.sta.active(True)
-        self.sta.disconnect()
-
-        # Initialize ESP-NOW
-        self.esp = espnow.ESPNow()
-        self.esp.active(True)
-
-        # Add the broadcast address to the peer list for discovering receivers
-        self.broadcast_mac = b'\xff\xff\xff\xff\xff\xff'
-        self.esp.add_peer(self.broadcast_mac)
-
-        # Set self.id to the byte form of the MAC address
-        self.id = self.sta.config('mac')
-        print(f"Node ID: {self.id}")
-        self.pos = (random.randint(0, 10), random.randint(0, 10))  # Random position
+        super().init()
 
         self.txCounter = 0
-        self.neighbor_table = {}  # Dictionary to store neighbors their overheads and path
+        self.neighbor_table = {}  # Dictionary to store neighbors, their overheads, and paths
         self.rssi = 0
         self.overhead = 1
-        self.path = 0
+        self.path = GATEWAY
         self.clk_offset = 0  # Clock offset for synchronization
         self.strt_flag = False
         self.dataCache = {}
+        self.reply_deadline = None  # Initialize reply deadline
 
     ###################
     def run(self):
@@ -58,7 +41,7 @@ class MyNode():
         Main loop for Node.
         '''
         if self.id == GATEWAY:
-            self.scene.nodecolor(self.id, 0, 0, 1)  # Set the color of the source node to blue
+            self.scene.nodecolor(self.id, 0, 0, 1)  # Set the color of the gateway node to blue
             self.scene.nodewidth(self.id, 2)
 
             yield self.timeout(1)
@@ -66,7 +49,10 @@ class MyNode():
                 self.log(f"STARTING")
                 self.send_dreq(self.id, self.txCounter, self.pos, self.rssi, self.overhead, self.path, self.now)
 
+                self.reply_deadline = self.sim.env.now + REPLY_TIMEOUT
+
                 yield self.timeout(INTERVAL)
+                self.check_reply_timeout()
                 self.log(f"COMPLETE")
 
                 self.scene.clearlinks()
@@ -104,75 +90,73 @@ class MyNode():
         data = json.loads(kwargs['data'].decode('utf-8'))  # Load data from JSON
 
         if msg == 'dreq':
+            self.isNewTx(data)
 
-            self.isNewTx(data) # If new transaction, reset the node
-
-            if not self.neighbor_table :            # First DREQ message received
-                self.updateNeighborTable(sender, data) # Update the neighbor table
-                self.overhead = self.calculate_overhead() + data['overhead']  # Calculate node overhead
+            if not self.neighbor_table:
+                self.updateNeighborTable(sender, data)
+                self.overhead = self.calculate_overhead() + data['overhead']
                 if self.id != GATEWAY:
-                    self.path = sender                      # Update self.path
+                    self.path = sender
 
-                self.scene.addlink(sender, self.id, "parent") # Sim: Add a link between the sender and this node
+                self.scene.addlink(sender, self.id, "parent")
 
                 yield self.timeout(randdelay())
-                self.send_dreq(sender, self.txCounter, self.pos, self.rssi, self.overhead, self.path, self.now) # Forward the RREQ message to neighbors
+                self.send_dreq(sender, self.txCounter, self.pos, self.rssi, self.overhead, self.path, self.now)
 
-                self.strt_flag = True # Set the start flag to True
-                self.start_reply()  # Start the reply process
+                self.strt_flag = True
+                self.start_reply()
 
-            if self.neighbor_table:  # Node has received a DREQ message before
-                if sender not in self.neighbor_table or data['overhead'] < self.neighbor_table[sender]['overhead']:
+            elif sender not in self.neighbor_table or data['overhead'] < self.neighbor_table[sender]['overhead']:
+                self.updateNeighborTable(sender, data)
 
-                    self.updateNeighborTable(sender, data) # Update the neighbor table
+                self.scene.addlink(sender, self.id, "parent")
 
-                    self.scene.addlink(sender, self.id, "parent") # Sim: Add a link between the sender and this node
+                lowest_neighbor = self.lowestoverheadNeighbor()
+                if data['overhead'] < self.neighbor_table[lowest_neighbor]['overhead']:
+                    self.overhead = self.calculate_overhead() + data['overhead']
+                    if self.id != GATEWAY:
+                        self.path = sender
 
-                    # Check if the new recieved overhead is less than the current lowest overhead neighbor
-                    if data['overhead'] < self.neighbor_table[self.lowestoverheadNeighbor()]['overhead']:
-                        self.overhead = self.calculate_overhead() + data['overhead']  # Update Node overhead
-                        if self.id != GATEWAY:
-                            self.path = sender                      # Update self.path
+                    yield self.timeout(randdelay())
+                    self.send_dreq(sender, self.txCounter, self.pos, self.rssi, self.overhead, self.path, self.now)
 
-                        yield self.timeout(randdelay())
-                        self.send_dreq(sender, self.txCounter, self.pos, self.rssi, self.overhead, self.path, self.now)  # Forward the DREQ message
-
-                        self.strt_flag = False
-                        yield self.timeout(DELAY)
-                        self.strt_flag = True
-                        self.start_reply() # Start the reply process again
-
+                    self.strt_flag = False
+                    yield self.timeout(DELAY)
+                    self.strt_flag = True
+                    self.start_reply()
 
         elif msg == 'dreply':
-            self.log(f"RECIEVED: DREP from {sender}")
+            self.log(f"RECEIVED: DREP from {sender}")
 
-            self.dataCacheUpdate() # Add own data to the dataCache
+            self.dataCacheUpdate()
 
-            self.dataCache.update(data) # Add the sent data to the dataCache by merging dictionaries
+            self.dataCache.update(data)
 
-            self.neighbor_table.setdefault(sender, {})['rx'] = 1 # Update neighbor packets received
+            self.neighbor_table.setdefault(sender, {})['rx'] = 1
             
-            # Log the neighbor table entries where 'path' == self.id
             branches = {key: neighbor for key, neighbor in self.neighbor_table.items() if neighbor.get('path') == self.id}
 
-            # Check if all branches have 'rx' == 1
             if all(neighbor.get('rx', 0) == 1 for neighbor in branches.values()):
-
-                if self.id != GATEWAY: # If this node is not the gateway, forward the data packet
-                    yield self.timeout(randdelay())             # Wait for a random delay
-                    self.send_dreply(self.id, self.dataCache)   # Send the data packet to the next node
-
-                else:                                                   # Data has reached the gateway                   
+                if self.id != GATEWAY:
+                    yield self.timeout(randdelay())
+                    self.send_dreply(self.id, self.dataCache)
+                else:
                     self.log(f"RECEIVED data from connected nodes")
                     self.log(self.format_data_cache())
+                    self.scene.clearlinks()
+                    for node in self.sim.nodes:
+                        self.scene.nodecolor(node.id, 0, 0, 0)
+                        self.scene.nodewidth(node.id, 1)
+                    self.neighbor_table = {}
 
-                    self.neighbor_table = {} # Reset the Gateway neighbor table
+    ###################
+    def check_reply_timeout(self):
+        '''Check if the reply timeout has been reached.'''
+        if self.sim.env.now >= self.reply_deadline and self.id == GATEWAY:
+            self.log(f"No reply received after {REPLY_TIMEOUT} seconds.")
+            self.strt_flag = True
 
-
-            else: 
-                # Unrecieved branches
-                pendingBranches = [key for key, neighbor in branches.items() if neighbor.get('rx', 0) == 0]
-                self.log(f"WAITING FOR: {pendingBranches}")
+    # (Rest of the methods remain the same as per actual implementation, with some modifications for simulation specifics)
 
     ###################
     def isNewTx(self, data):
@@ -281,13 +265,14 @@ class MyNode():
         Returns a formatted string representation of the data cache with aligned columns.
         '''
         formatted_cache = []
-        header = f"Tx:{self.txCounter} DATA:\n{'Time':<11}{'Node':<8}{'ID':<8}{'Position':<20}{'Temp(°C)':<10}{'Hum(%)':<10}"
+        header = f"Tx:{self.txCounter} DATA:\n{'Time':<11}{'Node_ID':<8}{'Position':<20}{'Temp(°C)':<10}{'Hum(%)':<10}"
         formatted_cache.append(header)
-        formatted_cache.append('-' * 70)  # Divider line for better readability
+        formatted_cache.append('-' * 70)  # Divider line
 
         for node_id, data in self.dataCache.items():
-            formatted_data = f"{data['time']:<11.4f}{node_id:<8}{data['id']:<8}{str(data['pos']):<20}{data['temp']:<10}{data['hum']:<10}"
+            formatted_data = f"{data['time']:<11.4f}{node_id:<8}{str(data['pos']):<20}{data['temp']:<10}{data['hum']:<10}"
             formatted_cache.append(formatted_data)
+        formatted_cache.append('-' * 70)  # Divider line
 
         return "\n".join(formatted_cache)
 
@@ -295,8 +280,28 @@ class MyNode():
     ############################
     @property
     def now(self):
-        return utime.ticks_ms()/1000
+        return self.sim.env.now
 
+###########################################################
+sim = wsp.Simulator(
+    until=200,
+    timescale=3,
+    visual=True,
+    terrain_size=(350, 350),
+    title="SimNet")
 
-node = MyNode()
-node.init()
+# Define a line style for parent links
+sim.scene.linestyle("parent", color=(0, 0.8, 0), arrow="head", width=2)
+
+# Place nodes in square grid
+
+for x in range(int(num_nodes ** 0.5)):
+    for y in range(int(num_nodes ** 0.5)):
+        px = 50 + x * 60 + random.uniform(-20, 20)
+        py = 50 + y * 60 + random.uniform(-20, 20)
+        node = sim.add_node(MyNode, (round(px,2), round(py,2)))
+        node.tx_range = 75
+        node.logging = True
+
+# Start the simulation
+sim.run()
