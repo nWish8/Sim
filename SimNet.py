@@ -5,8 +5,8 @@ import wsnsimpy.wsnsimpy_tk as wsp
 
 TX_RANGE = 75
 GATEWAY = 0  # Gateway id
-INTERVAL = 20  # Increased to allow time for replies
-DELAY = 2  # Delayed execution time
+INTERVAL = 10  # Increased to allow time for replies
+DELAY = 1  # Delayed execution time
 WEIGHT = 0.5  # Weight for calculating overhead (battery level and RSSI)
 num_nodes = 25
 
@@ -20,7 +20,6 @@ def randdelay():
 ###########################################################
 class MyNode(wsp.LayeredNode):
 
-    ###################
     def init(self):
         '''
         Initialize the node.
@@ -43,7 +42,6 @@ class MyNode(wsp.LayeredNode):
         self.data_cache = {}
         self.latency = 0
 
-    ###################
     def run(self):
         '''
         Main loop for Node.
@@ -56,6 +54,7 @@ class MyNode(wsp.LayeredNode):
             while True:
                 self.log(f"STARTING")
                 self.send_dreq()
+                self.latency = self.now  # Store the time when the request was sent
 
                 yield self.timeout(INTERVAL)
 
@@ -63,7 +62,6 @@ class MyNode(wsp.LayeredNode):
                 self.scene.clearlinks()
                 self.tx_counter += 1
 
-    ###################
     def send_dreq(self):
         '''
         Send a Data Request (DREQ) message to broadcast address.
@@ -85,7 +83,6 @@ class MyNode(wsp.LayeredNode):
         except Exception as e:
             self.log(f"ERROR: {e}")
 
-    ###################
     def send_dreply(self, src, data_cache):
         '''
         Send a Data Reply (DREP) message to the lowest overhead node.
@@ -100,7 +97,6 @@ class MyNode(wsp.LayeredNode):
         except Exception as e:
             self.log(f"ERROR: {e}")
 
-    ###################
     def on_receive(self, sender, msg, **kwargs):
         '''
         Handle received messages and act based on the message type.
@@ -176,6 +172,8 @@ class MyNode(wsp.LayeredNode):
                     # self.log(f"\n" + self.init_data_cache())
 
                     self.log_data() # Log the data
+                    self.log(f"DATA:\n" + self.init_data_cache())
+                    self.log(f"COMPLETE")
                     for node in self.sim.nodes:
                         self.scene.nodecolor(node.id, 0, 0, 0)
                         self.scene.nodewidth(node.id, 1)
@@ -187,7 +185,6 @@ class MyNode(wsp.LayeredNode):
                 pendingBranches = [key for key, neighbor in branches.items() if neighbor.get('rx', 0) == 0]
                 #self.log(f"WAITING FOR: {pendingBranches}")
 
-    ###################
     def delayed_exec(self, delay, func, *args, **kwargs):
         '''Execute a function after a delay.'''
         return self.sim.delayed_exec(delay, func, *args, **kwargs)
@@ -209,72 +206,6 @@ class MyNode(wsp.LayeredNode):
                     self.send_dreply(self.id, self.data_cache)  # Send the DREP message
         self.delayed_exec(DELAY, start)
 
-    def log_data(self):
-        '''Log the collected data'''
-        
-        # Calcualte latency in seconds
-        self.latency = self.now - self.latency
-        
-        # Add data to the log file
-        filename = 'latency_SIM.txt'
-        try:
-            if self.tx_counter == 0:
-                # Overwrite the file if tx_counter is 0
-                mode = 'w'
-                data_string = self.init_latency()
-
-            else:
-                # Append to the file if tx_counter is not 0
-                mode = 'a'
-                data_string = self.format_latency()
-            
-            with open(filename, mode) as f:
-                f.write(data_string)
-            self.log(f"Data written to {filename}")
-        except Exception as e:
-            self.log(f"Error writing data to file: {str(e)}")
-
-
-        # Add data to the log file
-        filename = 'data_log_SIM.txt'
-        try:
-            if self.tx_counter == 0:
-                # Overwrite the file if tx_counter is 0
-                mode = 'w'
-                data_string = self.init_data_cache()
-
-            else:
-                # Append to the file if tx_counter is not 0
-                mode = 'a'
-                data_string = self.format_data_cache()
-            
-            with open(filename, mode) as f:
-                f.write(data_string + '\n')
-            self.log(f"Data written to {filename}")
-        except Exception as e:
-            self.log(f"Error writing data to file: {str(e)}")
-
-        
-        self.log(f"DATA:\n" + self.init_data_cache())
-
-        self.log("COMPLETE")
-
-        self.scene.clearlinks() # Clear the links
-        for node in self.sim.nodes: # Reset all the node coulors to default
-            self.scene.nodecolor(node.id, 0, 0, 0)
-            self.scene.nodewidth(node.id, 1)
-
-        self.start_dreq = True
-        self.tx_counter += 1
-        self.neighbor_table = {}  # Reset the gateway neighbor table
-        self.data_cache = {}  # Reset data cache
-
-    def lowest_overhead_neighbor(self):
-        '''
-        Returns the neighbor with the lowest overhead.
-        '''
-        return min(self.neighbor_table, key=lambda n: self.neighbor_table[n]['overhead'])
-
     def calculate_overhead(self, sender, data):
         '''
         Calculate the overhead based on battery level and RSSI.
@@ -293,17 +224,6 @@ class MyNode(wsp.LayeredNode):
         overhead = round(WEIGHT * self.apparent_battery + (1 - WEIGHT) * -1*self.apparent_rssi,3)
         return overhead
 
-    def is_edge_node(self):
-        '''
-        Determine if the node is an edge node by checking the path of all neighbors.
-        The node is an edge node if its ID is not stored as the path in any neighbor's entry.
-        Returns True if the node is an edge node, False otherwise.
-        '''
-        for neighbor in self.neighbor_table.values():
-            if neighbor.get('path') == self.id:
-                return False
-        return True
-
     def is_new_transaction(self, data):
         '''If new transaction, reset the node.'''
         if data['tx_counter'] != self.tx_counter:
@@ -316,6 +236,23 @@ class MyNode(wsp.LayeredNode):
             self.reply_flag = False  # Reset reply flag
             self.reply_deadline = None  # Reset the reply deadline
             self.data_cache = {}
+
+    def is_edge_node(self):
+        '''
+        Determine if the node is an edge node by checking the path of all neighbors.
+        The node is an edge node if its ID is not stored as the path in any neighbor's entry.
+        Returns True if the node is an edge node, False otherwise.
+        '''
+        for neighbor in self.neighbor_table.values():
+            if neighbor.get('path') == self.id:
+                return False
+        return True
+
+    def lowest_overhead_neighbor(self):
+        '''
+        Returns the neighbor with the lowest overhead.
+        '''
+        return min(self.neighbor_table, key=lambda n: self.neighbor_table[n]['overhead'])
 
     def update_neighbor_table(self, sender, data):
         '''Update the neighbor table with sender info and add peer to ESP-NOW'''
@@ -378,7 +315,6 @@ class MyNode(wsp.LayeredNode):
         # Get the sender node
         sender_node = self.sim.nodes[sender]
 
-
         # Calculate the distance between self and sender_node
         distance = math.hypot(
             self.pos[0] - sender_node.pos[0],
@@ -396,41 +332,103 @@ class MyNode(wsp.LayeredNode):
     def log(self, msg):
         print(f"Node {'#'+str(self.id):4}[{self.now:10.5f}] {msg}")
 
-    def init_latency(self):
+    def log_data(self):
+        '''Log the collected data'''
+        
+        # Calculate latency in seconds
+        self.latency = self.now - self.latency
+        
+        # Write latency to a CSV file
+        latency_filename = 'latency_SIM.csv'
+        try:
+            if self.tx_counter == 0:
+                # Overwrite the file if tx_counter is 0 and write header
+                mode = 'w'
+                data_string = "Tx,Latency\n"
+                data_string += f"{self.tx_counter},{self.latency:.2f}\n"
+            else:
+                # Append to the file if tx_counter is not 0
+                mode = 'a'
+                data_string = f"{self.tx_counter},{self.latency:.2f}\n"
+            
+            with open(latency_filename, mode) as f:
+                f.write(data_string)
+            self.log(f"Latency data written to {latency_filename}")
+        except Exception as e:
+            self.log(f"Error writing latency data to file: {str(e)}")
+        
+        # Write data cache to CSV file
+        data_filename = 'data_log_SIM.csv'
+        try:
+            if self.tx_counter == 0:
+                # Overwrite the file if tx_counter is 0
+                mode = 'w'
+                data_string = self.init_csv_data_cache()
+            else:
+                # Append to the file if tx_counter is not 0
+                mode = 'a'
+                data_string = self.format_csv_data_cache()
+            
+            with open(data_filename, mode) as f:
+                f.write(data_string + '\n')
+            self.log(f"Data written to {data_filename}")
+        except Exception as e:
+            self.log(f"Error writing data to file: {str(e)}")
+
+    def init_csv_data_cache(self):
         '''
-        Returns a formatted string representation 
+        Returns a formatted string representation of the data cache in CSV format.
         '''
         formatted_cache = []
         header = (
-            f"Latency Log:\n" +
-            f"{'Tx':<4}" +
-            f"{'Time':<9}"
+            f"Tx,Time,MAC,PosX,PosY,Temp,Hum,Pres,Batt,RSSI,HopCount"
         )
         formatted_cache.append(header)
-        formatted_cache.append('-' * 100)  # Divider line
-
-        formatted_data = (
-            f"{self.tx_counter:<4}" +
-            f"{self.latency:<9.2}" 
-        )
-        formatted_cache.append(formatted_data)
-
+        
+        for id, data in self.data_cache.items():
+            pos_x, pos_y = data['pos']  # Unpack position into x and y
+            formatted_data = (
+                f"{self.tx_counter}," +
+                f"{data['time']:.2f}," +           # Time formatted to 2 decimal places
+                f"{id}," +
+                f"{pos_x:.2f}," +                  # Position X
+                f"{pos_y:.2f}," +                  # Position Y
+                f"{data['temperature']:.2f}," +
+                f"{data['humidity']:.2f}," +
+                f"{data['pressure']:.2f}," +
+                f"{data['battery_level']:.1f}," +  # Assuming battery level is already a percentage
+                f"{data['rssi']:.1f}," +
+                f"{data['hop_count']}"
+            )
+            formatted_cache.append(formatted_data)
+        
         return "\n".join(formatted_cache)
 
-    def format_latency(self):
+    def format_csv_data_cache(self):
         '''
-        Returns a formatted string representation of the data cache with aligned columns.
+        Returns a formatted string representation of the data cache in CSV format.
         '''
         formatted_cache = []
-
-        formatted_data = (f"\n" +  
-            f"{self.tx_counter:<4}" +
-            f"{self.latency:<9.2}" 
-        )
-        formatted_cache.append(formatted_data)
-
+        
+        for id, data in self.data_cache.items():
+            pos_x, pos_y = data['pos']  # Unpack position into x and y
+            formatted_data = (
+                f"{self.tx_counter}," +
+                f"{data['time']:.2f}," +
+                f"{id}," +
+                f"{pos_x:.2f}," +
+                f"{pos_y:.2f}," +
+                f"{data['temperature']:.2f}," +
+                f"{data['humidity']:.2f}," +
+                f"{data['pressure']:.2f}," +
+                f"{data['battery_level']:.1f}," +
+                f"{data['rssi']:.1f}," +
+                f"{data['hop_count']}"
+            )
+            formatted_cache.append(formatted_data)
+        
         return "\n".join(formatted_cache)
-
+    
     def init_data_cache(self):
         '''
         Returns a formatted string representation of the data cache with aligned columns.
@@ -455,30 +453,7 @@ class MyNode(wsp.LayeredNode):
         for id, data in self.data_cache.items():
             formatted_data = (
                 f"{self.tx_counter:<4}" +
-                f"{round(data['time'],3):<9.2}" +
-                f"{str(id):<9}" +
-                f"{str(data['pos']):<22}" +
-                f"{data['temperature']:<8.2f}" +
-                f"{data['humidity']:<8.2f}" +
-                f"{data['pressure']:<8}" +
-                f"{data['battery_level']:<8.1f}" +  # Display battery level as percentage
-                f"{data['rssi']:<8.1f}" +
-                f"{data['hop_count']:<6}"
-            )
-            formatted_cache.append(formatted_data)
-
-        return "\n".join(formatted_cache)
-
-    def format_data_cache(self):
-        '''
-        Returns a formatted string representation of the data cache with aligned columns.
-        '''
-        formatted_cache = []
-
-        for id, data in self.data_cache.items():
-            formatted_data = (
-                f"{self.tx_counter:<4}" +
-                f"{round(data['time'],3):<9.2}" +
+                f"{round(data['time'],3):<9.2f}" +
                 f"{str(id):<9}" +
                 f"{str(data['pos']):<22}" +
                 f"{data['temperature']:<8.2f}" +
