@@ -3,12 +3,17 @@ import math
 import json
 import wsnsimpy.wsnsimpy_tk as wsp
 
+TIMESCALE = 5  # Time scale for the simulation
+
 TX_RANGE = 75
 GATEWAY = 0  # Gateway id
 INTERVAL = 10  # Increased to allow time for replies
 DELAY = 1  # Delayed execution time
 WEIGHT = 0.5  # Weight for calculating overhead (battery level and RSSI)
-num_nodes = 25
+num_nodes = 25  # Number of nodes in the network
+
+POWER_PER_MSG = 0.0278  # Initial battery level
+POWER_PER_RECEIVE = 0.0126  # Battery level for receiving a message
 
 ###########################################################
 def randdelay():
@@ -16,6 +21,13 @@ def randdelay():
     Returns a random delay between 0.2 and 0.6 seconds.
     '''
     return random.uniform(0.2, 0.6)
+
+# Global dictionary to store message counters for all nodes
+message_counters = {
+    'dreq': {},  # Dictionary for DREQ message counts for each node
+    'drep': {}   # Dictionary for DREP message counts for each node
+}
+
 
 ###########################################################
 class MyNode(wsp.LayeredNode):
@@ -29,6 +41,8 @@ class MyNode(wsp.LayeredNode):
         self.start_dreq = True
         self.last_request_time = 0  # Store the time when the request was sent
         self.tx_counter = 0
+        self.dreq_counter = 0  # Counter for DREQ messages sent
+        self.drep_counter = 0  # Counter for DREP messages sent
         self.neighbor_table = {}  # Dictionary to store neighbors, their overheads, and paths
         self.hop_count = 0 # Hop count to the gateway
         self.battery_level = 100
@@ -41,6 +55,12 @@ class MyNode(wsp.LayeredNode):
         self.start_flag = False
         self.data_cache = {}
         self.latency = 0
+
+        # Initialize global counters for this node
+        global message_counters
+        message_counters['dreq'][self.id] = 0
+        message_counters['drep'][self.id] = 0
+
 
     def run(self):
         '''
@@ -58,7 +78,7 @@ class MyNode(wsp.LayeredNode):
 
                 yield self.timeout(INTERVAL)
 
-                yield self.timeout(10)
+                yield self.timeout(5)
                 self.scene.clearlinks()
                 self.tx_counter += 1
 
@@ -79,6 +99,7 @@ class MyNode(wsp.LayeredNode):
         
         try:
             self.send(wsp.BROADCAST_ADDR, msg='dreq', data=json_data)
+            self.battery_level -= POWER_PER_MSG  # Reduce battery level by % for each DREQ sent
             #self.log(f"SENT: DREQ from {self.id}")
         except Exception as e:
             self.log(f"ERROR: {e}")
@@ -93,6 +114,7 @@ class MyNode(wsp.LayeredNode):
 
         try:
             self.send(self.path, msg='dreply', src=src, data=json_data)
+            self.battery_level -= POWER_PER_MSG  # Reduce battery level by % for each DREQ sent
             #self.log(f"SENT: DREP to {self.path}")
         except Exception as e:
             self.log(f"ERROR: {e}")
@@ -104,7 +126,14 @@ class MyNode(wsp.LayeredNode):
         data = json.loads(kwargs['data'].decode('utf-8'))  # Load data from JSON
 
         if msg == 'dreq':
+            self.dreq_counter += 1  # Increment local DREQ counter
+            message_counters['dreq'][self.id] += 1  # Increment global DREQ counter
 
+            if self.id == GATEWAY:  # If the node is the gateway, ignore DREQ messages
+                self.update_neighbor_table(sender, data) # Update the neighbor table
+                return
+            
+            self.battery_level -= POWER_PER_RECEIVE  # Reduce battery level by % for each message recieved plus processing
             self.is_new_transaction(data) # If new transaction, reset the node
 
             if not self.neighbor_table :            # First DREQ message received
@@ -144,7 +173,10 @@ class MyNode(wsp.LayeredNode):
 
 
         elif msg == 'dreply':
+            self.drep_counter += 1  # Increment local DREP counter
+            message_counters['drep'][self.id] += 1  # Increment global DREP counter
             #self.log(f"RECIEVED: DREP from {sender}")
+            self.battery_level -= POWER_PER_RECEIVE  # Reduce battery level by % for each message recieved plus processing
 
             # Incrmement hop count of recieved data
             # For all instances in the parsed data increment hop count by 1
@@ -173,17 +205,15 @@ class MyNode(wsp.LayeredNode):
 
                     self.log_data() # Log the data
                     self.log(f"DATA:\n" + self.init_data_cache())
-                    self.log(f"COMPLETE")
-                    for node in self.sim.nodes:
-                        self.scene.nodecolor(node.id, 0, 0, 0)
-                        self.scene.nodewidth(node.id, 1)
+
                     self.neighbor_table = {} # Reset the Gateway neighbor table
 
 
             else: 
                 # Unrecieved branches
-                pendingBranches = [key for key, neighbor in branches.items() if neighbor.get('rx', 0) == 0]
-                #self.log(f"WAITING FOR: {pendingBranches}")
+                if self.id == GATEWAY: # If this node is not the gateway, forward the data packet
+                    pendingBranches = [key for key, neighbor in branches.items() if neighbor.get('rx', 0) == 0]
+                    self.log(f"WAITING FOR: {pendingBranches}")
 
     def delayed_exec(self, delay, func, *args, **kwargs):
         '''Execute a function after a delay.'''
@@ -227,9 +257,17 @@ class MyNode(wsp.LayeredNode):
     def is_new_transaction(self, data):
         '''If new transaction, reset the node.'''
         if data['tx_counter'] != self.tx_counter:
+
+            for node in self.sim.nodes:
+                if node.id != GATEWAY:                                
+                    self.scene.nodecolor(node.id, 0, 0, 0)
+                    self.scene.nodewidth(node.id, 1)
+
             self.tx_counter = data['tx_counter']
             self.neighbor_table = {}
             self.rssi = 0.0
+            self.apparent_battery = 0
+            self.apparent_rssi = 0.0
             self.overhead = 0.0
             self.path = GATEWAY
             self.start_flag = False
@@ -375,6 +413,21 @@ class MyNode(wsp.LayeredNode):
         except Exception as e:
             self.log(f"Error writing data to file: {str(e)}")
 
+    def log_global_counters(self):
+        '''Log global counters for all nodes to a CSV file'''
+        filename = 'message_counters_log.csv'
+        try:
+            # Write to the file
+            with open(filename, 'w') as f:
+                f.write("NodeID,DREQ,DREP\n")  # Write the header
+                for node_id in message_counters['dreq'].keys():
+                    dreq_count = message_counters['dreq'][node_id]
+                    drep_count = message_counters['drep'][node_id]
+                    f.write(f"{node_id},{dreq_count},{drep_count}\n")
+            self.log(f"Message counters written to {filename}")
+        except Exception as e:
+            self.log(f"Error writing message counters to file: {str(e)}")
+
     def init_csv_data_cache(self):
         '''
         Returns a formatted string representation of the data cache in CSV format.
@@ -474,8 +527,8 @@ class MyNode(wsp.LayeredNode):
 
 ###########################################################
 sim = wsp.Simulator(
-    until=200,
-    timescale=1,
+    until=800,
+    timescale=TIMESCALE,
     visual=True,
     terrain_size=(350, 350),
     title="SimNet")
@@ -490,8 +543,46 @@ for x in range(int(num_nodes ** 0.5)):
         px = 50 + x * 60 + random.uniform(-20, 20)
         py = 50 + y * 60 + random.uniform(-20, 20)
         node = sim.add_node(MyNode, (round(px,2), round(py,2)))
-        node.tx_range = 75
+        node.tx_range = TX_RANGE
         node.logging = True
+
+# # Hard-coded positions for the nodes based on the vineyard test site layout
+# # Adjusted values based on the relative layout shown in the image
+
+# # Node 0
+# px, py = 50, 50  # Set approximate positions based on visual layout
+# node = sim.add_node(MyNode, (round(px, 2), round(py, 2)))
+# node.tx_range = TX_RANGE
+# node.logging = True
+
+# # Node 1
+# px, py = 90, 70  # Adjusted position for Node 1
+# node = sim.add_node(MyNode, (round(px, 2), round(py, 2)))
+# node.tx_range = TX_RANGE
+# node.logging = True
+
+# # Node 2
+# px, py = 70, 120  # Adjusted position for Node 2
+# node = sim.add_node(MyNode, (round(px, 2), round(py, 2)))
+# node.tx_range = TX_RANGE
+# node.logging = True
+
+# # Node 3
+# px, py = 120, 130  # Adjusted position for Node 3
+# node = sim.add_node(MyNode, (round(px, 2), round(py, 2)))
+# node.tx_range = TX_RANGE
+# node.logging = True
+
+# # Node 4
+# px, py = 70, 175  # Adjusted position for Node 4
+# node = sim.add_node(MyNode, (round(px, 2), round(py, 2)))
+# node.tx_range = TX_RANGE
+# node.logging = True
+
 
 # Start the simulation
 sim.run()
+
+# Log global message counters at the end of the simulation
+for node in sim.nodes:
+    node.log_global_counters()
